@@ -661,6 +661,16 @@ public final class PropertyKey implements Comparable<PropertyKey> {
           .setConsistencyCheckLevel(ConsistencyCheckLevel.ENFORCE)
           .setScope(Scope.SERVER)
           .build();
+  public static final PropertyKey UNDERFS_OBJECT_BREADCRUMBS_ENABLED =
+      new Builder(Name.UNDERFS_OBJECT_BREADCRUMBS_ENABLED)
+          .setAlias("alluxio.underfs.object.breadcrumbs.enabled")
+          .setDefaultValue(true)
+          .setDescription("Set this to false to prevent Alluxio from creating zero byte objects "
+              + "during read or list operations on object store UFS. Leaving this on enables more"
+              + " efficient listing of prefixes.")
+          .setConsistencyCheckLevel(ConsistencyCheckLevel.WARN)
+          .setScope(Scope.SERVER)
+          .build();
   public static final PropertyKey UNDERFS_OBJECT_STORE_MULTI_RANGE_CHUNK_SIZE =
       new Builder(Name.UNDERFS_OBJECT_STORE_MULTI_RANGE_CHUNK_SIZE)
           .setDefaultValue(String.format("${%s}", Name.USER_BLOCK_SIZE_BYTES_DEFAULT))
@@ -1013,6 +1023,7 @@ public final class PropertyKey implements Comparable<PropertyKey> {
   public static final PropertyKey SWIFT_PASSWORD_KEY = new Builder(Name.SWIFT_PASSWORD_KEY)
       .setDescription("The password used for user:tenant authentication.")
       .setConsistencyCheckLevel(ConsistencyCheckLevel.ENFORCE)
+      .setDisplayType(DisplayType.CREDENTIALS)
       .build();
   public static final PropertyKey SWIFT_SIMULATION = new Builder(Name.SWIFT_SIMULATION)
       .setDescription("Whether to simulate a single node Swift backend for testing purposes: "
@@ -1022,10 +1033,12 @@ public final class PropertyKey implements Comparable<PropertyKey> {
   public static final PropertyKey SWIFT_TENANT_KEY = new Builder(Name.SWIFT_TENANT_KEY)
       .setDescription("Swift user for authentication.")
       .setConsistencyCheckLevel(ConsistencyCheckLevel.ENFORCE)
+      .setDisplayType(DisplayType.CREDENTIALS)
       .build();
   public static final PropertyKey SWIFT_USER_KEY = new Builder(Name.SWIFT_USER_KEY)
       .setDescription("Swift tenant for authentication.")
       .setConsistencyCheckLevel(ConsistencyCheckLevel.ENFORCE)
+      .setDisplayType(DisplayType.CREDENTIALS)
       .build();
   public static final PropertyKey SWIFT_REGION_KEY = new Builder(Name.SWIFT_REGION_KEY)
       .setDescription("Service region when using Keystone authentication.")
@@ -1036,6 +1049,7 @@ public final class PropertyKey implements Comparable<PropertyKey> {
           .setDescription("The access key of COS bucket.")
           .setConsistencyCheckLevel(ConsistencyCheckLevel.ENFORCE)
           .setScope(Scope.SERVER)
+          .setDisplayType(DisplayType.CREDENTIALS)
           .build();
   public static final PropertyKey COS_APP_ID =
       new Builder(Name.COS_APP_ID)
@@ -1070,6 +1084,7 @@ public final class PropertyKey implements Comparable<PropertyKey> {
           .setDescription("The secret key of COS bucket.")
           .setConsistencyCheckLevel(ConsistencyCheckLevel.ENFORCE)
           .setScope(Scope.SERVER)
+          .setDisplayType(DisplayType.CREDENTIALS)
           .build();
   // Journal ufs related properties
   public static final PropertyKey MASTER_JOURNAL_UFS_OPTION =
@@ -1083,6 +1098,7 @@ public final class PropertyKey implements Comparable<PropertyKey> {
           .setDescription("The access key of Kodo bucket.")
           .setConsistencyCheckLevel(ConsistencyCheckLevel.ENFORCE)
           .setScope(Scope.SERVER)
+          .setDisplayType(DisplayType.CREDENTIALS)
           .build();
   public static final PropertyKey KODO_SECRET_KEY =
       new Builder(Name.KODO_SECRET_KEY)
@@ -1140,6 +1156,35 @@ public final class PropertyKey implements Comparable<PropertyKey> {
           .setDescription("The storage address of the UFS at the Alluxio root mount point.")
           .setDefaultValue(String.format("${%s}/underFSStorage", Name.WORK_DIR))
           .setConsistencyCheckLevel(ConsistencyCheckLevel.ENFORCE)
+          .setScope(Scope.MASTER)
+          .build();
+  public static final PropertyKey MASTER_SHIMFS_AUTO_MOUNT_ENABLED =
+      new Builder(Name.MASTER_SHIMFS_AUTO_MOUNT_ENABLED)
+          .setDescription("If enabled, Alluxio will attempt to mount UFS for foreign URIs.")
+          .setDefaultValue(false)
+          .setConsistencyCheckLevel(ConsistencyCheckLevel.WARN)
+          .setScope(Scope.MASTER)
+          .build();
+  public static final PropertyKey MASTER_SHIMFS_AUTO_MOUNT_ROOT =
+      new Builder(Name.MASTER_SHIMFS_AUTO_MOUNT_ROOT)
+          .setDescription("Alluxio root path for auto-mounted UFSes. "
+              + "This directory should already exist in Alluxio.")
+          .setDefaultValue("/auto-mount")
+          .setConsistencyCheckLevel(ConsistencyCheckLevel.WARN)
+          .setScope(Scope.MASTER)
+          .build();
+  public static final PropertyKey MASTER_SHIMFS_AUTO_MOUNT_READONLY =
+      new Builder(Name.MASTER_SHIMFS_AUTO_MOUNT_READONLY)
+          .setDescription("If true, UFSes are auto-mounted as read-only.")
+          .setDefaultValue(true)
+          .setConsistencyCheckLevel(ConsistencyCheckLevel.WARN)
+          .setScope(Scope.MASTER)
+          .build();
+  public static final PropertyKey MASTER_SHIMFS_AUTO_MOUNT_SHARED =
+      new Builder(Name.MASTER_SHIMFS_AUTO_MOUNT_SHARED)
+          .setDescription("If true, UFSes are auto-mounted as shared.")
+          .setDefaultValue(false)
+          .setConsistencyCheckLevel(ConsistencyCheckLevel.WARN)
           .setScope(Scope.MASTER)
           .build();
 
@@ -1812,6 +1857,13 @@ public final class PropertyKey implements Comparable<PropertyKey> {
               + "is set to 0, the cache will be disabled, and "
               + "`alluxio.user.file.metadata.load.type=ONCE` will behave like `ALWAYS`.")
           .setConsistencyCheckLevel(ConsistencyCheckLevel.WARN)
+          .setScope(Scope.MASTER)
+          .build();
+  public static final PropertyKey MASTER_UPDATE_CHECK_ENABLED =
+      new Builder(Name.MASTER_UPDATE_CHECK_ENABLED)
+          .setDefaultValue(true)
+          .setDescription("Whether to check for update availability.")
+          .setConsistencyCheckLevel(ConsistencyCheckLevel.ENFORCE)
           .setScope(Scope.MASTER)
           .build();
   public static final PropertyKey MASTER_WEB_BIND_HOST =
@@ -3724,6 +3776,8 @@ public final class PropertyKey implements Comparable<PropertyKey> {
     public static final String UNDERFS_WEB_PARENT_NAMES = "alluxio.underfs.web.parent.names";
     public static final String UNDERFS_WEB_TITLES = "alluxio.underfs.web.titles";
     public static final String UNDERFS_VERSION = "alluxio.underfs.version";
+    public static final String UNDERFS_OBJECT_BREADCRUMBS_ENABLED =
+            "alluxio.underfs.object.breadcrumbs.enabled";
     public static final String UNDERFS_OBJECT_STORE_SERVICE_THREADS =
         "alluxio.underfs.object.store.service.threads";
     public static final String UNDERFS_OBJECT_STORE_MOUNT_SHARED_PUBLICLY =
@@ -3966,6 +4020,8 @@ public final class PropertyKey implements Comparable<PropertyKey> {
         "alluxio.master.ufs.path.cache.capacity";
     public static final String MASTER_UFS_PATH_CACHE_THREADS =
         "alluxio.master.ufs.path.cache.threads";
+    public static final String MASTER_UPDATE_CHECK_ENABLED =
+        "alluxio.master.update.check.enabled";
     public static final String MASTER_WEB_BIND_HOST = "alluxio.master.web.bind.host";
     public static final String MASTER_WEB_HOSTNAME = "alluxio.master.web.hostname";
     public static final String MASTER_WEB_PORT = "alluxio.master.web.port";
@@ -3980,6 +4036,14 @@ public final class PropertyKey implements Comparable<PropertyKey> {
         "alluxio.master.journal.gc.threshold";
     public static final String MASTER_JOURNAL_TEMPORARY_FILE_GC_THRESHOLD_MS =
         "alluxio.master.journal.temporary.file.gc.threshold";
+    public static final String MASTER_SHIMFS_AUTO_MOUNT_ENABLED =
+        "alluxio.master.shimfs.auto.mount.enabled";
+    public static final String MASTER_SHIMFS_AUTO_MOUNT_ROOT =
+        "alluxio.master.shimfs.auto.mount.root";
+    public static final String MASTER_SHIMFS_AUTO_MOUNT_READONLY =
+        "alluxio.master.shimfs.auto.mount.readonly";
+    public static final String MASTER_SHIMFS_AUTO_MOUNT_SHARED =
+        "alluxio.master.shimfs.auto.mount.shared";
 
     //
     // File system master related properties

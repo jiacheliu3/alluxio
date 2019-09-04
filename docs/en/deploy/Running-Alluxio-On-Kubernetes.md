@@ -84,24 +84,87 @@ Once the helm repository is available, Alluxio prepare the Alluxio configuration
 ```console
 $ cat << EOF > config.yaml
 properties:
-  alluxio.mount.table.root.ufs: "<under_storage_address>"
+  alluxio.master.mount.table.root.ufs: "<under_storage_address>"
 EOF
 ```
 Note: The Alluxio under filesystem address MUST be modified. Any credentials MUST be modified.
-For example, is using Amazon S3 as the under store, add properties as:
+
+Once the configuration is finalized, install as follows:
+```console
+helm install --name alluxio -f config.yaml alluxio-local/alluxio --version {{site.ALLUXIO_VERSION_STRING}}
+```
+
+##### Example: Amazon S3 as the under store
 ```console
 $ cat << EOF > config.yaml
 properties:
-  alluxio.mount.table.root.ufs: "s3a://<bucket>"
+  alluxio.master.mount.table.root.ufs: "s3a://<bucket>"
   aws.accessKeyId: "<accessKey>"
   aws.secretKey: "<secretKey>"
 EOF
 ```
 
+##### Example: HDFS as the under store
+First create secrets for any configuration required by an HDFS client. These are mounted under `/secrets`.
+```console
+$ kubectl create secret generic alluxio-hdfs-config --from-file=./core-site.xml --from-file=./hdfs-site.xml
+```
+Then mount these secrets to the Alluxio master and worker containers as follows:
+```console
+$ cat << EOF > config.yaml
+properties:
+  alluxio.master.mount.table.root.ufs: "hdfs://<ns>"
+  alluxio.underfs.hdfs.configuration: "/secrets/hdfsConfig/core-site.xml:/secrets/hdfsConfig/hdfs-site.xml"
+secrets:
+  master:
+    alluxio-hdfs-config: hdfsConfig
+  worker:
+    alluxio-hdfs-config: hdfsConfig
+EOF
+```
+Note: Multiple secrets can be mounted by adding more rows to the configuration such as:
+```console
+$ cat << EOF > config.yaml
+...
+secrets:
+  master:
+    alluxio-hdfs-config: hdfsConfig
+    alluxio-ceph-config: cephConfig
+    ...
+  worker:
+    alluxio-hdfs-config: hdfsConfig
+    alluxio-ceph-config: cephConfig
+    ...
+EOF
+```
+
+##### Example: Off-heap Metastore Management
+The following configuration provisions an emptyDir volume with the specified configuration and
+configures the Alluxio master to use the mounted directory for the RocksDB metastore.
+```console
+$ cat << EOF > config.yaml
+properties:
+  ...
+  alluxio.master.metastore: ROCKS
+  alluxio.master.metastore.dir: /metastore
+
+volumes:
+  master:
+    metastore:
+      medium: ""
+      size: 1Gi
+      mountPath: /metastore
+EOF
+```
+
 #### Using `kubectl`
 
-Define environment variables in `alluxio.properties`. Copy the properties template at
-`integration/kubernetes/conf`, and modify or add any configuration properties as required.
+Copy the template.
+```console
+$ cp alluxio-configMap.yaml.template alluxio-configMap.yaml
+```
+
+Modify or add any configuration properties as required.
 The Alluxio under filesystem address MUST be modified. Any credentials MUST be modified.
 
 ```
@@ -112,16 +175,11 @@ ALLUXIO_JAVA_OPTS=-Dalluxio.master.mount.table.root.ufs=<under_storage_address>
 
 Note that when running Alluxio with host networking, the ports assigned to Alluxio services must
 not be occupied beforehand.
-```console
-$ cp alluxio-configMap.yaml.template alluxio-configMap.yaml
-```
 
 Create a ConfigMap.
 ```console
 $ kubectl create -f alluxio-configMap.yaml
 ```
-
-### Deploy
 
 Prepare the Alluxio deployment specs from the templates. Modify any parameters required, such as
 location of the **Docker image**, and CPU and memory requirements for pods.
@@ -170,13 +228,15 @@ $ ./bin/alluxio runTests
 
 ### Uninstall
 
-If using `helm`, uninstall Alluxio as follows:
+#### Using `helm`
+
+Uninstall Alluxio as follows:
 ```console
-$ helm list # Identify release name
-$ helm delete <release-name>
+$ helm delete alluxio
 ```
 
-If using `kubectl`, uninstall Alluxio as follows:
+#### Using `kubectl`
+Uninstall Alluxio as follows:
 ```console
 $ kubectl delete -f alluxio-worker.yaml
 $ kubectl delete -f alluxio-master.yaml
