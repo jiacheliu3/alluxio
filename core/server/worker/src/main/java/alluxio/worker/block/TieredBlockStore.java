@@ -337,6 +337,7 @@ public class TieredBlockStore implements BlockStore {
       }
 
       TempBlockMeta tempBlockMeta = mMetaManager.getTempBlockMeta(blockId);
+      LOG.warn("Located tempBlockMeta {} to expand on", tempBlockMeta);
 
       StorageDirView allocationDir = allocateSpace(sessionId,
               AllocateOptions.forRequestSpace(additionalBytes, tempBlockMeta.getBlockLocation()));
@@ -775,6 +776,94 @@ public class TieredBlockStore implements BlockStore {
     return loc;
   }
 
+  private StorageDirView allocateSpaceCreateBlock(long sessionId, AllocateOptions options) {
+    StorageDirView dirView = null;
+    BlockMetadataView allocatorView =
+            new BlockMetadataAllocatorView(mMetaManager, options.canUseReservedSpace());
+    try {
+      // Allocate from given location.
+      dirView = mAllocator.allocateBlockWithView(sessionId, options.getSize(),
+              options.getLocation(), allocatorView);
+
+      if (dirView != null) {
+        return dirView;
+      }
+
+      // This means the dirView is null
+      LOG.warn("dirView is null");
+      if (options.isForceLocation()) {
+        if (options.isEvictionAllowed()) {
+          // TODO(jiacheng): When does it reach here?
+          // This is from requestSpace
+
+          LOG.warn("isForceLocation=true, isEvictionAllowed=true, freeSpace on the location");
+          freeSpace(sessionId, options.getSize(), options.getSize(), options.getLocation());
+          dirView = mAllocator.allocateBlockWithView(sessionId, options.getSize(),
+                  options.getLocation(), allocatorView.refreshView());
+
+          if (dirView == null) {
+            LOG.error("Target tier: {} has no evictable space to store {} bytes for session: {}",
+                    options.getLocation(), options.getSize(), sessionId);
+            return null;
+          }
+          // dirView is not null, will be returned at the end
+        } else {
+          // TODO(jiacheng): When does it reach here?
+          // not found?
+
+          LOG.error("isForceLocation=true, isEvictionAllowed=false. Target tier: {} has no available space to store {} bytes for session: {}",
+                  options.getLocation(), options.getSize(), sessionId);
+          return null;
+        }
+      } else {
+        // TODO(jiacheng): When does it reach here?
+        // this is from createBlockMetaInternal
+
+
+        LOG.warn("isForceLocation=false, allocate on any tier {}", options);
+
+        dirView = mAllocator.allocateBlockWithView(sessionId, options.getSize(),
+                BlockStoreLocation.anyTier(), allocatorView);
+
+        if (dirView != null) {
+          LOG.warn("Found allocation on another tier {}", dirView.toBlockStoreLocation());
+          return dirView;
+        }
+
+        LOG.warn("try allocation failed, free space");
+        if (options.isEvictionAllowed()) {
+          LOG.warn("isEvictionAllowed=true, evict here.");
+          // TODO(jiacheng): When does it reach here?
+
+          // There is no space left on worker.
+          // Free more than requested by configured free-ahead size.
+          long freeAheadBytes =
+                  ServerConfiguration.getBytes(PropertyKey.WORKER_TIERED_STORE_FREE_AHEAD_BYTES);
+          // TODO(jiacheng): How does freeSpace free? from the bottom tier?
+          freeSpace(sessionId, options.getSize(), options.getSize() + freeAheadBytes,
+                  BlockStoreLocation.anyTier());
+
+          dirView = mAllocator.allocateBlockWithView(sessionId, options.getSize(),
+                  BlockStoreLocation.anyTier(), allocatorView.refreshView());
+          if (dirView == null) {
+            LOG.error("Failed to free enough space from worker for {} bytes for session: {}",
+                    options.getSize(), sessionId);
+          } else {
+            LOG.warn("Freed space {} from worker", options.getSize() + freeAheadBytes);
+          }
+        } else {
+          LOG.warn("isEvictionAllowed=false, allocation ends in failure");
+        }
+
+      }
+    } catch (Exception e) {
+      LOG.error("Allocation failure. Options: {}. Error: {}", options, e);
+      return null;
+    }
+
+    return dirView;
+  }
+
   private StorageDirView allocateSpace(long sessionId, AllocateOptions options) {
     StorageDirView dirView = null;
     BlockMetadataView allocatorView =
@@ -909,9 +998,10 @@ public class TieredBlockStore implements BlockStore {
 
       // Allocate space.
       LOG.warn("createBlockMetaInternal allocating space with options {}", options);
-      LOG.warn("Allocate more than necessary to force allocation go to lower tiers.");
-      long blockSize = ServerConfiguration.global().getBytes(PropertyKey.USER_BLOCK_SIZE_BYTES_DEFAULT);
-      options.setSize(blockSize * 2);
+//      LOG.warn("Allocate more than necessary to force allocation go to lower tiers.");
+      reportTierAvailability();
+//      long blockSize = ServerConfiguration.global().getBytes(PropertyKey.USER_BLOCK_SIZE_BYTES_DEFAULT);
+//      options.setSize(blockSize * 2);
       StorageDirView dirView = allocateSpace(sessionId, options);
 
       if (dirView == null) {

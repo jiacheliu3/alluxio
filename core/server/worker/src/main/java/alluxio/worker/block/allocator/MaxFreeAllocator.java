@@ -16,6 +16,7 @@ import alluxio.worker.block.BlockStoreLocation;
 import alluxio.worker.block.meta.StorageDirView;
 import alluxio.worker.block.meta.StorageTierView;
 
+import alluxio.worker.block.reviewer.AllocationReviewer;
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -63,14 +64,18 @@ public final class MaxFreeAllocator implements Allocator {
     Preconditions.checkNotNull(location, "location");
     StorageDirView candidateDirView = null;
 
-
     if (location.equals(BlockStoreLocation.anyTier())) {
       for (StorageTierView tierView : mMetadataView.getTierViews()) {
         candidateDirView = getCandidateDirInTier(tierView, blockSize,
             BlockStoreLocation.ANY_MEDIUM);
         if (candidateDirView != null) {
-          LOG.debug("Allocating to {} for anyTier", candidateDirView.toBlockStoreLocation());
-          break;
+          if (AllocationReviewer.reviewAllocation(candidateDirView)) {
+            LOG.warn("Allocation accepted: {}", candidateDirView.toBlockStoreLocation());
+            break;
+          } else {
+            LOG.warn("Allocation rejected: {}", candidateDirView.toBlockStoreLocation());
+            continue;
+          }
         }
       }
       if (candidateDirView == null) {
@@ -81,6 +86,12 @@ public final class MaxFreeAllocator implements Allocator {
       candidateDirView = getCandidateDirInTier(tierView, blockSize, BlockStoreLocation.ANY_MEDIUM);
       if (candidateDirView != null) {
         LOG.debug("Allocating to {} for anyDirInTier", candidateDirView.toBlockStoreLocation());
+        if (AllocationReviewer.reviewAllocation(candidateDirView)) {
+          LOG.warn("Allocation accepted: {}", candidateDirView.toBlockStoreLocation());
+        } else {
+          LOG.warn("Allocation rejected: {}", candidateDirView.toBlockStoreLocation());
+          candidateDirView = null;
+        }
       } else {
         LOG.info("Failed to allocate with blockSize={}, location={} for anyDirInTier", blockSize, location);
       }
@@ -89,7 +100,13 @@ public final class MaxFreeAllocator implements Allocator {
         candidateDirView = getCandidateDirInTier(tierView, blockSize, location.mediumType());
         if (candidateDirView != null) {
           LOG.debug("Allocating to {} for anyDirInTierWithMedium", candidateDirView.toBlockStoreLocation());
-          break;
+          if (AllocationReviewer.reviewAllocation(candidateDirView)) {
+            LOG.warn("Allocation accepted: {}", candidateDirView.toBlockStoreLocation());
+            break;
+          } else {
+            LOG.warn("Allocation rejected: {}", candidateDirView.toBlockStoreLocation());
+            continue;
+          }
         }
       }
       if (candidateDirView == null) {

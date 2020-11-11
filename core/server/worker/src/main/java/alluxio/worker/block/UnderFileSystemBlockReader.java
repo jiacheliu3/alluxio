@@ -359,9 +359,9 @@ public final class UnderFileSystemBlockReader extends BlockReader {
     try {
       if (mBlockWriter == null && offset == 0 && !mBlockMeta.isNoCache()) {
         // TODO(jiacheng): try update this?
-//        BlockStoreLocation loc = BlockStoreLocation.anyDirInTier(mStorageTierAssoc.getAlias(0));
-        LOG.warn("Allow the new block to be in any tier");
-        BlockStoreLocation loc = BlockStoreLocation.anyTier();
+        LOG.warn("Allow the new block to be in tier 0");
+        BlockStoreLocation loc = BlockStoreLocation.anyDirInTier(mStorageTierAssoc.getAlias(0));
+//        BlockStoreLocation loc = BlockStoreLocation.anyTier();
         long threadId = Thread.currentThread().getId();
 
         // We want to catch when the tier 0 does not have enough space for a block
