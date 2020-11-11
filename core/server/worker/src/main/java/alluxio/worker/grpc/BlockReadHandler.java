@@ -238,6 +238,7 @@ public final class BlockReadHandler extends AbstractReadHandler<BlockReadRequest
   @Override
   protected DataReader createDataReader(BlockReadRequestContext context,
       StreamObserver<ReadResponse> response) {
+    LOG.warn("Creating BlockDataReader with chunk size {}", context.getRequest().getChunkSize());
     return new BlockDataReader(context, response, mWorker);
   }
 }

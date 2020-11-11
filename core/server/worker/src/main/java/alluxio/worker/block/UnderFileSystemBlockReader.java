@@ -222,10 +222,12 @@ public final class UnderFileSystemBlockReader extends BlockReader {
     ByteBuf bufCopy = null;
     if (mBlockWriter != null) {
       bufCopy = buf.duplicate();
+      // TODO(jiacheng): what does this do?
       bufCopy.readerIndex(bufCopy.writerIndex());
     }
     int bytesToRead =
         (int) Math.min(buf.writableBytes(), mBlockMeta.getBlockSize() - mInStreamPos);
+    LOG.warn("bytesToRead=min({}, {} - {})", buf.writableBytes(), mBlockMeta.getBlockSize(), mInStreamPos);
     int bytesRead = buf.writeBytes(mUnderFileSystemInputStream, bytesToRead);
     if (bytesRead <= 0) {
       return bytesRead;
@@ -235,8 +237,14 @@ public final class UnderFileSystemBlockReader extends BlockReader {
 
     if (mBlockWriter != null && bufCopy != null) {
       try {
+        // TODO(jiacheng): what does this mean? if i allocate 64MB to the block,
+        // Should i be requesting more space here?
         bufCopy.writerIndex(buf.writerIndex());
         while (bufCopy.readableBytes() > 0) {
+          LOG.warn("ReadableBytes={}, requesting space for blockId={}, additionalBytes={}",
+                  bufCopy.readableBytes(),
+                  mBlockMeta.getBlockId(),
+                  mInStreamPos - mBlockWriter.getPosition());
           mLocalBlockStore.requestSpace(mBlockMeta.getSessionId(), mBlockMeta.getBlockId(),
               mInStreamPos - mBlockWriter.getPosition());
           mBlockWriter.append(bufCopy);
@@ -350,11 +358,23 @@ public final class UnderFileSystemBlockReader extends BlockReader {
     }
     try {
       if (mBlockWriter == null && offset == 0 && !mBlockMeta.isNoCache()) {
-        BlockStoreLocation loc = BlockStoreLocation.anyDirInTier(mStorageTierAssoc.getAlias(0));
+        // TODO(jiacheng): try update this?
+//        BlockStoreLocation loc = BlockStoreLocation.anyDirInTier(mStorageTierAssoc.getAlias(0));
+        LOG.warn("Allow the new block to be in any tier");
+        BlockStoreLocation loc = BlockStoreLocation.anyTier();
+        long threadId = Thread.currentThread().getId();
+
+        // We want to catch when the tier 0 does not have enough space for a block
+        if (mLocalBlockStore.tier0Full()) {
+          LOG.warn("Stop here and check");
+        }
+
         mLocalBlockStore.createBlock(mBlockMeta.getSessionId(), mBlockMeta.getBlockId(),
             AllocateOptions.forCreate(mInitialBlockSize, loc));
+        LOG.warn("{} - Allocation successful.", threadId);
         mBlockWriter = mLocalBlockStore.getBlockWriter(
             mBlockMeta.getSessionId(), mBlockMeta.getBlockId());
+        LOG.warn("{} - Created block writer for block id {}", threadId, mBlockMeta.getBlockId());
       }
     } catch (BlockAlreadyExistsException e) {
       // This can happen when there are concurrent UFS readers who are all trying to cache to block.

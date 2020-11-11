@@ -368,4 +368,7 @@ public interface BlockStore extends SessionCleanable, Closeable {
    * @return true if at least one storage path failed check and is removed, false otherwise
    */
   boolean checkStorage();
+
+
+  boolean tier0Full();
 }

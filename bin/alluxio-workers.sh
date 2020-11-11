@@ -48,6 +48,7 @@ done
 echo "Waiting for tasks to finish..."
 has_error=0
 for ((i=0; i< ${#pids[@]}; i++)); do
+    echo "waiting for ${pids[$i]}"
     wait ${pids[$i]}
     ret_code=$?
     if [[ ${ret_code} -ne 0 ]]; then

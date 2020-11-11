@@ -163,7 +163,7 @@ public class ManagementTaskCoordinator implements Closeable {
         // Back off from worker if configured so.
         if (mBackoffStrategy == BackoffStrategy.ANY
             && mLoadTracker.loadDetected(BlockStoreLocation.anyTier())) {
-          LOG.debug("Load detected. Sleeping {}ms.", mLoadDetectionCoolDownMs);
+          LOG.warn("Load detected. Sleeping {}ms.", mLoadDetectionCoolDownMs);
           Thread.sleep(mLoadDetectionCoolDownMs);
           continue;
         }
@@ -178,7 +178,7 @@ public class ManagementTaskCoordinator implements Closeable {
 
         // Submit and wait for the task.
         currentTask = nextTask;
-        LOG.debug("Running task of type:{}", currentTask.getClass().getSimpleName());
+        LOG.warn("Running task of type:{}", currentTask.getClass().getSimpleName());
         // Run the current task on coordinator thread.
         try {
           BlockManagementTaskResult result = currentTask.run();

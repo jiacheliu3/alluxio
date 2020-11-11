@@ -11,6 +11,7 @@
 
 package alluxio.worker.block;
 
+import alluxio.collections.ConcurrentHashSet;
 import alluxio.conf.ServerConfiguration;
 import alluxio.conf.PropertyKey;
 import alluxio.exception.BlockAlreadyExistsException;
@@ -42,14 +43,19 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
+import java.util.Stack;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -83,6 +89,8 @@ import javax.annotation.concurrent.NotThreadSafe;
  */
 @NotThreadSafe // TODO(jiri): make thread-safe (c.f. ALLUXIO-1624)
 public class TieredBlockStore implements BlockStore {
+  private static final ConcurrentHashSet<String> memo = new ConcurrentHashSet<>();
+
   private static final Logger LOG = LoggerFactory.getLogger(TieredBlockStore.class);
 
   private final BlockMetadataManager mMetaManager;
@@ -208,10 +216,22 @@ public class TieredBlockStore implements BlockStore {
   @Override
   public TempBlockMeta createBlock(long sessionId, long blockId, AllocateOptions options)
       throws BlockAlreadyExistsException, WorkerOutOfSpaceException, IOException {
-    LOG.debug("createBlock: sessionId={}, blockId={}, options={}", sessionId, blockId, options);
+    LOG.warn("createBlock creating tempBlockMeta: sessionId={}, blockId={}, options={}", sessionId, blockId, options);
+
+    // We want to catch when the tier 0 does not have enough space for a block
+    long blockSize = ServerConfiguration.global().getBytes(PropertyKey.USER_BLOCK_SIZE_BYTES_DEFAULT);
+    long avail = mMetaManager.getAvailableBytes(BlockStoreLocation.anyDirInTier("MEM"));
+    if (avail < blockSize) {
+      LOG.warn("Tier 0 cannot hold a full block here");
+    }
+
     TempBlockMeta tempBlockMeta = createBlockMetaInternal(sessionId, blockId, true, options);
     if (tempBlockMeta != null) {
       createBlockFile(tempBlockMeta.getPath());
+
+      LOG.warn("Block created, report availability here");
+      reportTierAvailability();
+
       return tempBlockMeta;
     }
     // TODO(bin): We are probably seeing a rare transient failure, maybe define and throw some
@@ -302,40 +322,162 @@ public class TieredBlockStore implements BlockStore {
 
   @Override
   public void requestSpace(long sessionId, long blockId, long additionalBytes)
-      throws BlockDoesNotExistException, WorkerOutOfSpaceException, IOException {
-    LOG.debug("requestSpace: sessionId={}, blockId={}, additionalBytes={}", sessionId, blockId,
-        additionalBytes);
+          throws BlockDoesNotExistException, WorkerOutOfSpaceException, IOException {
+    LOG.warn("requestSpace: sessionId={}, blockId={}, additionalBytes={}", sessionId, blockId,
+            additionalBytes);
 
     // NOTE: a temp block is only visible to its own writer, unnecessary to acquire
     // block lock here since no sharing
     try (LockResource r = new LockResource(mMetadataWriteLock)) {
-      // TODO(jiacheng): where is this temp block meta?
+      // We want to catch when the tier 0 does not have enough space for a block
+      long blockSize = ServerConfiguration.global().getBytes(PropertyKey.USER_BLOCK_SIZE_BYTES_DEFAULT);
+      long avail = mMetaManager.getAvailableBytes(BlockStoreLocation.anyDirInTier("MEM"));
+      if (avail < blockSize) {
+        LOG.warn("Tier 0 cannot hold a full block here");
+      }
+
       TempBlockMeta tempBlockMeta = mMetaManager.getTempBlockMeta(blockId);
 
       StorageDirView allocationDir = allocateSpace(sessionId,
-          AllocateOptions.forRequestSpace(additionalBytes, tempBlockMeta.getBlockLocation()));
+              AllocateOptions.forRequestSpace(additionalBytes, tempBlockMeta.getBlockLocation()));
       if (allocationDir == null) {
         throw new WorkerOutOfSpaceException(String.format(
-            "Can't reserve more space for block: %d under session: %d.", blockId, sessionId));
+                "Can't reserve more space for block: %d under session: %d.", blockId, sessionId));
       }
 
       if (!allocationDir.toBlockStoreLocation().equals(tempBlockMeta.getBlockLocation())) {
         // If reached here, allocateSpace() failed to enforce 'forceLocation' flag.
-        // TODO(jiacheng): this is confusing
         throw new IllegalStateException(
-            String.format("Allocation error: location enforcement failed for location: %s",
-                allocationDir.toBlockStoreLocation()));
+                String.format("Allocation error: location enforcement failed for location: %s",
+                        allocationDir.toBlockStoreLocation()));
       }
+
+      LOG.warn("Space allocated, report availability.");
+      reportTierAvailability();
 
       // Increase the size of this temp block
       try {
         mMetaManager.resizeTempBlockMeta(
-            tempBlockMeta, tempBlockMeta.getBlockSize() + additionalBytes);
+                tempBlockMeta, tempBlockMeta.getBlockSize() + additionalBytes);
       } catch (InvalidWorkerStateException e) {
         throw Throwables.propagate(e); // we shall never reach here
       }
     }
   }
+
+
+//  @Override
+//  public void requestSpace(long sessionId, long blockId, long additionalBytes)
+//      throws BlockDoesNotExistException, WorkerOutOfSpaceException, IOException {
+//    StringWriter sw = new StringWriter();
+//    new Throwable("").printStackTrace(new PrintWriter(sw));
+//    String stackTrace = sw.toString();
+//    if (!memo.contains(stackTrace)) {
+//      LOG.warn("requesting space here {}", stackTrace);
+//      memo.add(stackTrace);
+//    }
+//
+//
+//    LOG.debug("requestSpace: sessionId={}, blockId={}, additionalBytes={}", sessionId, blockId,
+//        additionalBytes);
+//
+//    // NOTE: a temp block is only visible to its own writer, unnecessary to acquire
+//    // block lock here since no sharing
+//    try (LockResource r = new LockResource(mMetadataWriteLock)) {
+//      // TODO(jiacheng): where is this temp block meta?
+//      TempBlockMeta tempBlockMeta = mMetaManager.getTempBlockMeta(blockId);
+//      LOG.warn("In requestSpace found tempBlockMeta id={}, loc={}, size={}", tempBlockMeta.getBlockId(),
+//              tempBlockMeta.getBlockLocation(), tempBlockMeta.getBlockSize());
+//
+//      // On the 1st write, we try allocating space for the whole block
+//      // We allow the allocation to alleviate the constraint and go to lower tiers
+//      long firstBlockSize = ServerConfiguration.global().getBytes(PropertyKey.WORKER_NETWORK_READER_MAX_CHUNK_SIZE_BYTES);
+//
+//      if (tempBlockMeta.getBlockSize() == firstBlockSize) {
+//        LOG.warn("First write for the block");
+//        AllocateOptions options = AllocateOptions.forRequestSpace(additionalBytes, tempBlockMeta.getBlockLocation());
+//        options.setForceLocation(false);
+//        options.setEvictionAllowed(false);
+//        StorageDirView allocationDir = allocateSpace(sessionId, options);
+//        if (allocationDir == null) {
+//          // if no availability, we enable eviction and try again
+//          options.setEvictionAllowed(true);
+//          allocationDir = allocateSpace(sessionId, options);
+//        }
+//        if (allocationDir == null) {
+//          throw new WorkerOutOfSpaceException(String.format(
+//                  "Can't reserve more space for block: %d under session: %d.", blockId, sessionId));
+//        }
+//
+//        // If the allocated block space is different, issue a move
+//        if (!allocationDir.toBlockStoreLocation().equals(tempBlockMeta.getBlockLocation())) {
+//          LOG.warn("Updated block from {} to {}", tempBlockMeta.getBlockLocation(), allocationDir.toBlockStoreLocation());
+//          try {
+//            mMetaManager.moveTempBlockMeta(tempBlockMeta, allocationDir.toBlockStoreLocation());
+//          } catch (BlockAlreadyExistsException e) {
+//            LOG.error("Failed to move tempBlockMeta from {} to {}", tempBlockMeta.getBlockLocation(), allocationDir.toBlockStoreLocation());
+//          }
+//        }
+//
+//        // Change the block in meta master
+//        try {
+//          mMetaManager.resizeTempBlockMeta(
+//                  tempBlockMeta, tempBlockMeta.getBlockSize() + additionalBytes);
+//        } catch (InvalidWorkerStateException e) {
+//          throw Throwables.propagate(e); // we shall never reach here
+//        }
+//
+//      } else {
+//        AllocateOptions options = AllocateOptions.forRequestSpace(additionalBytes, tempBlockMeta.getBlockLocation());
+//        LOG.warn("requestSpace allocation space with options {}", options);
+//        StorageDirView allocationDir = allocateSpace(sessionId, options);
+//        if (allocationDir == null) {
+//          throw new WorkerOutOfSpaceException(String.format(
+//              "Can't reserve more space for block: %d under session: %d.", blockId, sessionId));
+//        }
+//
+//        if (!allocationDir.toBlockStoreLocation().equals(tempBlockMeta.getBlockLocation())) {
+//          // If reached here, allocateSpace() failed to enforce 'forceLocation' flag.
+//          // TODO(jiacheng): this is confusing
+//          throw new IllegalStateException(
+//                  String.format("Allocation error: location enforcement failed for location: %s",
+//                          allocationDir.toBlockStoreLocation()));
+//        }
+//
+//        // Increase the size of this temp block
+//        try {
+//          mMetaManager.resizeTempBlockMeta(
+//                  tempBlockMeta, tempBlockMeta.getBlockSize() + additionalBytes);
+//        } catch (InvalidWorkerStateException e) {
+//          throw Throwables.propagate(e); // we shall never reach here
+//        }
+//      }
+//
+////      AllocateOptions options = AllocateOptions.forRequestSpace(additionalBytes, tempBlockMeta.getBlockLocation());
+////      LOG.warn("requestSpace allocation space with options {}", options);
+////      StorageDirView allocationDir = allocateSpace(sessionId, options);
+////      if (allocationDir == null) {
+////        throw new WorkerOutOfSpaceException(String.format(
+////            "Can't reserve more space for block: %d under session: %d.", blockId, sessionId));
+////      }
+//
+////      if (!allocationDir.toBlockStoreLocation().equals(tempBlockMeta.getBlockLocation())) {
+////        // If reached here, allocateSpace() failed to enforce 'forceLocation' flag.
+////        // TODO(jiacheng): this is confusing
+////        throw new IllegalStateException(
+////            String.format("Allocation error: location enforcement failed for location: %s",
+////                allocationDir.toBlockStoreLocation()));
+////      }
+//
+////      // Increase the size of this temp block
+////      try {
+////        mMetaManager.resizeTempBlockMeta(
+////            tempBlockMeta, tempBlockMeta.getBlockSize() + additionalBytes);
+////      } catch (InvalidWorkerStateException e) {
+////        throw Throwables.propagate(e); // we shall never reach here
+////      }
+//    }
+//  }
 
   @Override
   public void moveBlock(long sessionId, long blockId, AllocateOptions moveOptions)
@@ -349,7 +491,7 @@ public class TieredBlockStore implements BlockStore {
       AllocateOptions moveOptions)
           throws BlockDoesNotExistException, BlockAlreadyExistsException,
           InvalidWorkerStateException, WorkerOutOfSpaceException, IOException {
-    LOG.debug("moveBlock: sessionId={}, blockId={}, oldLocation={}, options={}", sessionId,
+    LOG.warn("moveBlock: sessionId={}, blockId={}, oldLocation={}, options={}", sessionId,
         blockId, oldLocation, moveOptions);
     MoveBlockResult result = moveBlockInternal(sessionId, blockId, oldLocation, moveOptions);
     if (result.getSuccess()) {
@@ -449,6 +591,9 @@ public class TieredBlockStore implements BlockStore {
     LOG.info("freeSpace: sessionId={}, minContiguousBytes={}, minAvailableBytes={}, location={}",
         sessionId, minAvailableBytes, minAvailableBytes, location);
     freeSpaceInternal(sessionId, minContiguousBytes, minAvailableBytes, location);
+
+    LOG.warn("Space freed, report availability");
+    reportTierAvailability();
   }
 
   @Override
@@ -616,6 +761,7 @@ public class TieredBlockStore implements BlockStore {
 
     try (LockResource r = new LockResource(mMetadataWriteLock)) {
       mMetaManager.commitTempBlockMeta(tempBlockMeta);
+      LOG.warn("Committed tempBlockMeta {} from {} to {}", tempBlockMeta, srcPath, dstPath);
     } catch (BlockAlreadyExistsException | BlockDoesNotExistException
         | WorkerOutOfSpaceException e) {
       throw Throwables.propagate(e); // we shall never reach here
@@ -643,8 +789,13 @@ public class TieredBlockStore implements BlockStore {
       }
 
       // This means the dirView is null
+      LOG.warn("dirView is null");
       if (options.isForceLocation()) {
         if (options.isEvictionAllowed()) {
+          // TODO(jiacheng): When does it reach here?
+          // This is from requestSpace
+
+          LOG.warn("isForceLocation=true, isEvictionAllowed=true, freeSpace on the location");
           freeSpace(sessionId, options.getSize(), options.getSize(), options.getLocation());
           dirView = mAllocator.allocateBlockWithView(sessionId, options.getSize(),
               options.getLocation(), allocatorView.refreshView());
@@ -654,30 +805,55 @@ public class TieredBlockStore implements BlockStore {
                 options.getLocation(), options.getSize(), sessionId);
             return null;
           }
+          // dirView is not null, will be returned at the end
         } else {
-          LOG.error("Target tier: {} has no available space to store {} bytes for session: {}",
+          // TODO(jiacheng): When does it reach here?
+          // not found?
+
+          LOG.error("isForceLocation=true, isEvictionAllowed=false. Target tier: {} has no available space to store {} bytes for session: {}",
               options.getLocation(), options.getSize(), sessionId);
           return null;
         }
       } else {
+        // TODO(jiacheng): When does it reach here?
+        // this is from createBlockMetaInternal
+
+
+        LOG.warn("isForceLocation=false, allocate on any tier {}", options);
+
         dirView = mAllocator.allocateBlockWithView(sessionId, options.getSize(),
             BlockStoreLocation.anyTier(), allocatorView);
 
         if (dirView != null) {
+          LOG.warn("Found allocation on another tier {}", dirView.toBlockStoreLocation());
           return dirView;
         }
 
+        LOG.warn("try allocation failed, free space");
         if (options.isEvictionAllowed()) {
+          LOG.warn("isEvictionAllowed=true, evict here.");
+          // TODO(jiacheng): When does it reach here?
+
           // There is no space left on worker.
           // Free more than requested by configured free-ahead size.
           long freeAheadBytes =
               ServerConfiguration.getBytes(PropertyKey.WORKER_TIERED_STORE_FREE_AHEAD_BYTES);
+          // TODO(jiacheng): How does freeSpace free? from the bottom tier?
           freeSpace(sessionId, options.getSize(), options.getSize() + freeAheadBytes,
               BlockStoreLocation.anyTier());
 
           dirView = mAllocator.allocateBlockWithView(sessionId, options.getSize(),
               BlockStoreLocation.anyTier(), allocatorView.refreshView());
+          if (dirView == null) {
+            LOG.error("Failed to free enough space from worker for {} bytes for session: {}",
+                    options.getSize(), sessionId);
+          } else {
+            LOG.warn("Freed space {} from worker", options.getSize() + freeAheadBytes);
+          }
+        } else {
+          LOG.warn("isEvictionAllowed=false, allocation ends in failure");
         }
+
       }
     } catch (Exception e) {
       LOG.error("Allocation failure. Options: {}. Error: {}", options, e);
@@ -685,6 +861,21 @@ public class TieredBlockStore implements BlockStore {
     }
 
     return dirView;
+  }
+
+  /**
+   * This method is totally for debugging and understanding the tier usage
+   * */
+  private void reportTierAvailability() {
+    for (StorageTier tier : mMetaManager.getTiers()) {
+      long avail = 0;
+      long committed = 0;
+      for (StorageDir dir : tier.getStorageDirs()) {
+        avail += dir.getAvailableBytes();
+        committed += dir.getCommittedBytes();
+      }
+      LOG.warn("Tier {}: available={}, committed={}", tier.getTierAlias(), avail, committed);
+    }
   }
 
   /**
@@ -701,6 +892,14 @@ public class TieredBlockStore implements BlockStore {
    */
   private TempBlockMeta createBlockMetaInternal(long sessionId, long blockId, boolean newBlock,
       AllocateOptions options) throws BlockAlreadyExistsException {
+    StringWriter sw = new StringWriter();
+    new Throwable("").printStackTrace(new PrintWriter(sw));
+    String stackTrace = sw.toString();
+    if (!memo.contains(stackTrace)) {
+      LOG.warn("createBlockMetaInternal here {}", stackTrace);
+      memo.add(stackTrace);
+    }
+
     try (LockResource r = new LockResource(mMetadataWriteLock)) {
       // NOTE: a temp block is supposed to be visible for its own writer,
       // unnecessary to acquire block lock here since no sharing.
@@ -709,19 +908,32 @@ public class TieredBlockStore implements BlockStore {
       }
 
       // Allocate space.
+      LOG.warn("createBlockMetaInternal allocating space with options {}", options);
+      LOG.warn("Allocate more than necessary to force allocation go to lower tiers.");
+      long blockSize = ServerConfiguration.global().getBytes(PropertyKey.USER_BLOCK_SIZE_BYTES_DEFAULT);
+      options.setSize(blockSize * 2);
       StorageDirView dirView = allocateSpace(sessionId, options);
 
       if (dirView == null) {
+        // createBlockMetaInternal is used by createBlock and move
+        // which one can accept null?
+        // 1. createBlock
+        // if null -> WorkerOutofSpaceException
+        // 2. move
+        // if null -> fail to move immediately
+        LOG.warn("Failed to allocate space. Return dirView null.");
         return null;
       }
 
       // TODO(carson): Add tempBlock to corresponding storageDir and remove the use of
       // StorageDirView.createTempBlockMeta.
       TempBlockMeta tempBlock = dirView.createTempBlockMeta(sessionId, blockId, options.getSize());
+      LOG.warn("Created temp block meta for {}:{} in {}", blockId, options.getSize(), tempBlock.getBlockLocation());
       try {
         // Add allocated temp block to metadata manager. This should never fail if allocator
         // correctly assigns a StorageDir.
-        mMetaManager.addTempBlockMeta(tempBlock);
+        // TODO(jiacheng): potential fix: not update the mAvailableBytes here but only do so in requestSpace
+        mMetaManager.addTempBlockMeta(tempBlock, true);
       } catch (WorkerOutOfSpaceException | BlockAlreadyExistsException e) {
         // If we reach here, allocator is not working properly
         LOG.error("Unexpected failure: {} bytes allocated at {} by allocator, "
@@ -745,22 +957,9 @@ public class TieredBlockStore implements BlockStore {
       BlockStoreLocation location) throws WorkerOutOfSpaceException, IOException {
     // TODO(ggezer): Too much memory pressure when pinned-inodes list is large.
     BlockMetadataEvictorView evictorView = getUpdatedView();
-    LOG.debug(
+    LOG.warn(
         "freeSpaceInternal - locAvailableBytes: {}, minContiguousBytes: {}, minAvailableBytes: {}",
         evictorView.getAvailableBytes(location), minContiguousBytes, minAvailableBytes);
-
-    // TODO(jiacheng)
-    // Report tier usage
-    String[] tierNames = new String[]{"MEM", "SSD", "HDD"};
-    for (String t : tierNames) {
-      try {
-        long avail = mMetaManager.getAvailableBytes(BlockStoreLocation.anyDirInTier(t));
-        LOG.info("Available on tier {}: {}", t, avail);
-      } catch (IllegalArgumentException e) {
-        // Just skip this tier
-      }
-    }
-
 
     boolean contiguousSpaceFound = false;
     boolean availableBytesFound = false;
@@ -778,7 +977,7 @@ public class TieredBlockStore implements BlockStore {
       if (!contiguousSpaceFound) {
         for (StorageDirView dirView : dirViews) {
           if (dirView.getAvailableBytes() >= minContiguousBytes) {
-            LOG.debug("Found >{} contiguous bytes at {}", minContiguousBytes, dirView.toBlockStoreLocation());
+            LOG.warn("Found >{} contiguous bytes at {}", minContiguousBytes, dirView.toBlockStoreLocation());
             contiguousSpaceFound = true;
             break;
           }
@@ -788,18 +987,18 @@ public class TieredBlockStore implements BlockStore {
       // Check minAvailableBytes is satisfied.
       if (!availableBytesFound) {
         if (evictorView.getAvailableBytes(location) >= minAvailableBytes) {
-          LOG.debug("Found >{} available bytes at {}", minAvailableBytes, location);
+          LOG.warn("Found >{} available bytes at {}", minAvailableBytes, location);
           availableBytesFound = true;
         }
       }
 
       if (contiguousSpaceFound && availableBytesFound) {
-        LOG.debug("Found contiguous space that can satisfy the request.");
+        LOG.warn("Found contiguous space that can satisfy the request.");
         break;
       }
 
       if (!evictionCandidates.hasNext()) {
-        LOG.debug("None of candidates can satisfy the requirement. Abandon.");
+        LOG.warn("None of candidates can satisfy the requirement. Abandon.");
         break;
       }
 
@@ -808,7 +1007,8 @@ public class TieredBlockStore implements BlockStore {
       if (evictorView.isBlockEvictable(blockToDelete)) {
         try {
           BlockMeta blockMeta = mMetaManager.getBlockMeta(blockToDelete);
-          LOG.debug("Deleting block {}", blockMeta);
+          long threadId = Thread.currentThread().getId();
+          LOG.warn("{} - Deleting block {} from {}", threadId, blockMeta, blockMeta.getBlockLocation());
           removeBlockInternal(blockMeta);
           blocksRemoved++;
           synchronized (mBlockStoreEventListeners) {
@@ -824,7 +1024,7 @@ public class TieredBlockStore implements BlockStore {
           continue;
         }
       } else {
-        LOG.debug("Block {} not evictable", blockToDelete);
+        LOG.warn("Block {} not evictable", blockToDelete);
       }
     }
 
@@ -900,6 +1100,7 @@ public class TieredBlockStore implements BlockStore {
       }
 
       TempBlockMeta dstTempBlock = createBlockMetaInternal(sessionId, blockId, false, moveOptions);
+      // Null returned possibly due to allocation failure
       if (dstTempBlock == null) {
         return new MoveBlockResult(false, blockSize, null, null);
       }
@@ -916,6 +1117,8 @@ public class TieredBlockStore implements BlockStore {
         return new MoveBlockResult(true, blockSize, srcLocation, dstLocation);
       }
       dstFilePath = dstTempBlock.getCommitPath();
+      LOG.warn("Moving from src location:{}, file:{} to dst location:{}, file:{}", srcLocation, srcFilePath,
+              dstLocation, dstFilePath);
 
       // Heavy IO is guarded by block lock but not metadata lock. This may throw IOException.
       FileUtils.move(srcFilePath, dstFilePath);
@@ -1094,5 +1297,12 @@ public class TieredBlockStore implements BlockStore {
     BlockStoreLocation getDstLocation() {
       return mDstLocation;
     }
+  }
+
+  public boolean tier0Full() {
+    // We want to catch when the tier 0 does not have enough space for a block
+    long blockSize = ServerConfiguration.global().getBytes(PropertyKey.USER_BLOCK_SIZE_BYTES_DEFAULT);
+    long avail = mMetaManager.getAvailableBytes(BlockStoreLocation.anyDirInTier("MEM"));
+    return avail < blockSize;
   }
 }

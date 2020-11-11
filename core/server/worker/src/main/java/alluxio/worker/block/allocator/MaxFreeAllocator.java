@@ -73,7 +73,9 @@ public final class MaxFreeAllocator implements Allocator {
           break;
         }
       }
-      LOG.info("Failed to allocate with blockSize={}, location={} for anyTier", blockSize, location);
+      if (candidateDirView == null) {
+        LOG.info("Failed to allocate with blockSize={}, location={} for anyTier", blockSize, location);
+      }
     } else if (location.equals(BlockStoreLocation.anyDirInTier(location.tierAlias()))) {
       StorageTierView tierView = mMetadataView.getTierView(location.tierAlias());
       candidateDirView = getCandidateDirInTier(tierView, blockSize, BlockStoreLocation.ANY_MEDIUM);
@@ -90,7 +92,9 @@ public final class MaxFreeAllocator implements Allocator {
           break;
         }
       }
-      LOG.info("Failed to allocate with blockSize={}, location={} for anyDirInTierWithMedium", blockSize, location);
+      if (candidateDirView == null) {
+        LOG.info("Failed to allocate with blockSize={}, location={} for anyDirInTierWithMedium", blockSize, location);
+      }
     } else {
       StorageTierView tierView = mMetadataView.getTierView(location.tierAlias());
       StorageDirView dirView = tierView.getDirView(location.dir());
@@ -98,7 +102,9 @@ public final class MaxFreeAllocator implements Allocator {
         candidateDirView = dirView;
         LOG.debug("Allocating to specific dir {}", candidateDirView.toBlockStoreLocation());
       }
-      LOG.info("Failed to allocate with blockSize={}, location={} for specific dir", blockSize, location);
+      if (candidateDirView == null) {
+        LOG.info("Failed to allocate with blockSize={}, location={} for specific dir", blockSize, location);
+      }
     }
 
     return candidateDirView;

@@ -319,6 +319,7 @@ abstract class AbstractReadHandler<T extends ReadRequestContext<?>>
     DataReader(T context, StreamObserver<ReadResponse> response) {
       mContext = context;
       mRequest = context.getRequest();
+      LOG.warn("chunk size = min({}, {})", mRequest.getChunkSize(), MAX_CHUNK_SIZE);
       mChunkSize = Math.min(mRequest.getChunkSize(), MAX_CHUNK_SIZE);
       mResponse = (CallStreamObserver<ReadResponse>) response;
     }

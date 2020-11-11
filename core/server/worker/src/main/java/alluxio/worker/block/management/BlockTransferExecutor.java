@@ -75,7 +75,7 @@ public class BlockTransferExecutor {
    */
   public BlockOperationResult executeTransferList(List<BlockTransferInfo> transferInfos,
       Consumer<Exception> exceptionHandler) {
-    LOG.debug("Executing transfer list of size: {}. Concurrency limit: {}",
+    LOG.warn("Executing transfer list of size: {}. Concurrency limit: {}",
         transferInfos.size(), mConcurrencyLimit);
     // Return immediately for an empty transfer list.
     if (transferInfos.isEmpty()) {
@@ -126,13 +126,13 @@ public class BlockTransferExecutor {
       try {
         if (mLoadTracker.loadDetected(transferInfo.getSrcLocation(),
             transferInfo.getDstLocation())) {
-          LOG.debug("Skipping transfer-order: {} due to user activity.", transferInfo);
+          LOG.warn("Skipping transfer-order: {} due to user activity.", transferInfo);
           backOffCount++;
           continue;
         }
 
         boolean useReservedSpace = transferInfo.isSwap();
-
+        LOG.warn("Moving blocks for block transfer, useReservedSpace={}", useReservedSpace);
         mBlockStore.moveBlock(Sessions.createInternalSessionId(), transferInfo.getSrcBlockId(),
             AllocateOptions.forTierMove(transferInfo.getDstLocation())
                 .setUseReservedSpace(useReservedSpace));

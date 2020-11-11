@@ -98,7 +98,7 @@ public class AllocateOptions {
    * Creates default allocation options for moving a block by a client request.
    *  - Locations is strict
    *  - Evicting on destination is allowed
-   *
+   *c
    * @param location location of allocation
    * @return the allocation object initialized with defaults for moving
    */

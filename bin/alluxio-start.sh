@@ -259,8 +259,9 @@ start_worker() {
     echo "Mount failed, not starting worker" >&2
     exit 1
   fi
-
+  ALLUXIO_WORKER_JAVA_OPTS+=" -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5009 "
   echo "Starting worker @ $(hostname -f). Logging to ${ALLUXIO_LOGS_DIR}"
+  echo "${ALLUXIO_WORKER_JAVA_OPTS}"
   (ALLUXIO_WORKER_JAVA_OPTS=${ALLUXIO_WORKER_JAVA_OPTS} \
      nohup ${BIN}/launch-process worker > ${ALLUXIO_LOGS_DIR}/worker.out 2>&1 ) &
 }
@@ -455,6 +456,7 @@ main() {
       start_proxies
       ;;
     local)
+      ALLUXIO_MASTER_JAVA_OPTS=" -agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005 "
       local master_hostname=$(${BIN}/alluxio getConf alluxio.master.hostname)
       local is_master_set_and_local=false
       if [[ -n ${master_hostname} ]]; then

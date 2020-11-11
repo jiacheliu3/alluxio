@@ -68,13 +68,14 @@ public class PromoteTask extends AbstractBlockManagementTask {
 
   @Override
   public BlockManagementTaskResult run() {
-    LOG.debug("Running promote task.");
+    LOG.warn("Running promote task.");
     BlockManagementTaskResult result = new BlockManagementTaskResult();
     // Iterate each tier intersection and move to upper tier whenever required.
     for (Pair<BlockStoreLocation, BlockStoreLocation> intersection : mMetadataManager
         .getStorageTierAssoc().intersectionList()) {
       BlockStoreLocation tierUpLoc = intersection.getFirst();
       BlockStoreLocation tierDownLoc = intersection.getSecond();
+      LOG.warn("tierUpLoc {}, tierDownLoc {}", tierUpLoc, tierDownLoc);
 
       // Acquire iterator for the tier below.
       Iterator<Long> tierDownIterator =
@@ -136,6 +137,9 @@ public class PromoteTask extends AbstractBlockManagementTask {
         continue;
       }
     }
+    LOG.warn("Generated {} promotions from {} to {}.\n" + "Promotions transfers:\n ->{}",
+            transferInfos.size(), tierDownLocation.tierAlias(), tierUpLocation.tierAlias(),
+            transferInfos.stream().map(Objects::toString).collect(Collectors.joining("\n ->")));
     if (LOG.isDebugEnabled()) {
       LOG.debug("Generated {} promotions from {} to {}.\n" + "Promotions transfers:\n ->{}",
           transferInfos.size(), tierDownLocation.tierAlias(), tierUpLocation.tierAlias(),

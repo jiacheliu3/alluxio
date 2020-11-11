@@ -11,6 +11,7 @@
 
 package alluxio.worker.block.meta;
 
+import alluxio.collections.ConcurrentHashSet;
 import alluxio.conf.PropertyKey;
 import alluxio.conf.ServerConfiguration;
 import alluxio.exception.BlockAlreadyExistsException;
@@ -30,6 +31,8 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.concurrent.NotThreadSafe;
 import java.io.File;
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -50,6 +53,8 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 @NotThreadSafe
 public final class StorageDir {
+  private static final ConcurrentHashSet<String> memo = new ConcurrentHashSet<>();
+
   private static final Logger LOG = LoggerFactory.getLogger(StorageDir.class);
 
   private final long mCapacityBytes;
@@ -75,6 +80,7 @@ public final class StorageDir {
     mReservedBytes = new AtomicLong(reservedBytes);
     mAvailableBytes = new AtomicLong(capacityBytes - reservedBytes);
     mCommittedBytes = new AtomicLong(0);
+    LOG.warn("Initiate StorageDir {}:{}, avail={}, committed={}", tier, dirIndex, mAvailableBytes, mCommittedBytes);
     mDirPath = dirPath;
     mDirMedium = dirMedium;
     mBlockIdToBlockMap = new HashMap<>(200);
@@ -314,6 +320,12 @@ public final class StorageDir {
     }
     mBlockIdToBlockMap.put(blockId, blockMeta);
     reserveSpace(blockSize, true);
+    LOG.warn("Reserved space in addBlockMeta {}:{}, avail={}, committed={}", mTier, mDirIndex, mAvailableBytes, mCommittedBytes);
+  }
+
+  public void addTempBlockMeta(TempBlockMeta tempBlockMeta) throws WorkerOutOfSpaceException,
+          BlockAlreadyExistsException {
+    addTempBlockMeta(tempBlockMeta, true);
   }
 
   /**
@@ -323,7 +335,7 @@ public final class StorageDir {
    * @throws BlockAlreadyExistsException if blockId already exists
    * @throws WorkerOutOfSpaceException when not enough space to hold block
    */
-  public void addTempBlockMeta(TempBlockMeta tempBlockMeta) throws WorkerOutOfSpaceException,
+  public void addTempBlockMeta(TempBlockMeta tempBlockMeta, boolean reserveSpace) throws WorkerOutOfSpaceException,
       BlockAlreadyExistsException {
     Preconditions.checkNotNull(tempBlockMeta, "tempBlockMeta");
     long sessionId = tempBlockMeta.getSessionId();
@@ -346,7 +358,12 @@ public final class StorageDir {
     } else {
       sessionTempBlocks.add(blockId);
     }
-    reserveSpace(blockSize, false);
+    if (reserveSpace) {
+      reserveSpace(blockSize, false);
+      LOG.warn("Reserved space in addTempBlockMeta {}:{}, avail={}, committed={}", mTier, mDirIndex, mAvailableBytes, mCommittedBytes);
+    } else {
+      LOG.warn("Skip the space reserving in addTempBlockMeta");
+    }
   }
 
   /**
@@ -363,6 +380,7 @@ public final class StorageDir {
       throw new BlockDoesNotExistException(ExceptionMessage.BLOCK_META_NOT_FOUND, blockId);
     }
     reclaimSpace(blockMeta.getBlockSize(), true);
+    LOG.warn("Reclaimed space by removeBlockMeta in {}:{}, avail={}, committed={}", mTier, mDirIndex, mAvailableBytes, mCommittedBytes);
   }
 
   /**
@@ -388,7 +406,17 @@ public final class StorageDir {
     if (sessionBlocks.isEmpty()) {
       mSessionIdToTempBlockIdsMap.remove(sessionId);
     }
+
+    StringWriter sw = new StringWriter();
+    new Throwable("").printStackTrace(new PrintWriter(sw));
+    String stackTrace = sw.toString();
+    if (!memo.contains(stackTrace)) {
+      LOG.warn("removeTempBlockMeta here {}", stackTrace);
+      memo.add(stackTrace);
+    }
+
     reclaimSpace(tempBlockMeta.getBlockSize(), false);
+    LOG.warn("Reclaimed space by removeTempBlockMeta of size {} in {}:{}, avail={}, committed={}", tempBlockMeta.getBlockSize(), mTier, mDirIndex, mAvailableBytes, mCommittedBytes);
   }
 
   /**
@@ -403,6 +431,7 @@ public final class StorageDir {
     long oldSize = tempBlockMeta.getBlockSize();
     if (newSize > oldSize) {
       reserveSpace(newSize - oldSize, false);
+      LOG.warn("Resized tempBlockMeta in {}:{}, avail={}, committed={}", mTier, mDirIndex, mAvailableBytes, mCommittedBytes);
       tempBlockMeta.setBlockSize(newSize);
     } else if (newSize < oldSize) {
       throw new InvalidWorkerStateException("Shrinking block, not supported!");
@@ -432,6 +461,7 @@ public final class StorageDir {
       TempBlockMeta tempBlockMeta = mBlockIdToTempBlockMap.remove(tempBlockId);
       if (tempBlockMeta != null) {
         reclaimSpace(tempBlockMeta.getBlockSize(), false);
+        LOG.warn("Reclaimed space clean up session temp blocks in {}:{}, avail={}, committed={}", mTier, mDirIndex, mAvailableBytes, mCommittedBytes);
       } else {
         LOG.error("Cannot find blockId {} when cleanup sessionId {}", tempBlockId, sessionId);
       }
@@ -483,6 +513,7 @@ public final class StorageDir {
     Preconditions.checkState(mCapacityBytes >= mAvailableBytes.get() + size,
         "Available bytes should always be less than total capacity bytes");
     mAvailableBytes.addAndGet(size);
+    LOG.warn("Reclaimed space in {}:{}, avail={}, committed={}", mTier, mDirIndex, mAvailableBytes, mCommittedBytes);
     if (committed) {
       mCommittedBytes.addAndGet(-size);
     }

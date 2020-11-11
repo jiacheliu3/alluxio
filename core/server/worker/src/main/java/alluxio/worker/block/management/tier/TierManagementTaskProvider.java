@@ -110,6 +110,7 @@ public class TierManagementTaskProvider implements ManagementTaskProvider {
         ServerConfiguration.getBoolean(PropertyKey.WORKER_MANAGEMENT_TIER_SWAP_RESTORE_ENABLED);
     boolean promotionEnabled =
         ServerConfiguration.getBoolean(PropertyKey.WORKER_MANAGEMENT_TIER_PROMOTE_ENABLED);
+    LOG.warn("alignEnabled={} swapRestoreEnabled={} promotionEnabled={}", alignEnabled, swapRestoreEnabled, promotionEnabled);
 
     // Return swap-restore task if marked.
     if (swapRestoreEnabled && sSwapRestoreRequired) {
@@ -122,14 +123,15 @@ public class TierManagementTaskProvider implements ManagementTaskProvider {
     BlockMetadataEvictorView evictorView = mEvictorViewSupplier.get();
 
     // Iterate all tier intersections and decide which task to run.
+    // TODO(jiacheng): what does the intersection list do?
     for (Pair<BlockStoreLocation, BlockStoreLocation> intersection : mMetadataManager
         .getStorageTierAssoc().intersectionList()) {
       // Check if the intersection needs alignment.
       if (alignEnabled && !mMetadataManager.getBlockIterator().aligned(intersection.getFirst(),
           intersection.getSecond(), BlockOrder.Natural,
           (blockId) -> !evictorView.isBlockEvictable(blockId))) {
-        LOG.debug("Alignment needed between: {} - {}", intersection.getFirst().tierAlias(),
-            intersection.getSecond().tierAlias());
+        LOG.warn("Alignment needed between: {} - {}: <{}, {}>", intersection.getFirst().tierAlias(),
+            intersection.getSecond().tierAlias(), intersection.getFirst(), intersection.getSecond());
         return TierManagementTaskType.ALIGN;
       }
 

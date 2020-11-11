@@ -132,10 +132,15 @@ public final class BlockMetadataManager {
    * @throws WorkerOutOfSpaceException when no more space left to hold the block
    * @throws BlockAlreadyExistsException when the block already exists
    */
-  public void addTempBlockMeta(TempBlockMeta tempBlockMeta)
+  public void addTempBlockMeta(TempBlockMeta tempBlockMeta, boolean reserveSpace)
       throws WorkerOutOfSpaceException, BlockAlreadyExistsException {
     StorageDir dir = tempBlockMeta.getParentDir();
-    dir.addTempBlockMeta(tempBlockMeta);
+    dir.addTempBlockMeta(tempBlockMeta, reserveSpace);
+  }
+
+  public void addTempBlockMeta(TempBlockMeta tempBlockMeta)
+          throws WorkerOutOfSpaceException, BlockAlreadyExistsException {
+    addTempBlockMeta(tempBlockMeta, true);
   }
 
   /**
@@ -148,6 +153,9 @@ public final class BlockMetadataManager {
    */
   public void commitTempBlockMeta(TempBlockMeta tempBlockMeta)
       throws WorkerOutOfSpaceException, BlockAlreadyExistsException, BlockDoesNotExistException {
+
+    LOG.warn("Committing TempBlockMeta {} {} {}", tempBlockMeta.getBlockId(), tempBlockMeta.getBlockSize(), tempBlockMeta.getBlockLocation());
+
     long blockId = tempBlockMeta.getBlockId();
     if (hasBlockMeta(blockId)) {
       BlockMeta blockMeta = getBlockMeta(blockId);
@@ -445,6 +453,46 @@ public final class BlockMetadataManager {
         new BlockMeta(blockMeta.getBlockId(), blockMeta.getBlockSize(), dstDir);
     dstDir.removeTempBlockMeta(tempBlockMeta);
     dstDir.addBlockMeta(newBlockMeta);
+    return newBlockMeta;
+  }
+
+  public TempBlockMeta moveTempBlockMeta(TempBlockMeta tempBlockMeta, BlockStoreLocation newLocation)
+          throws BlockDoesNotExistException, WorkerOutOfSpaceException, BlockAlreadyExistsException {
+    // TODO(jiacheng)
+
+    // If existing location belongs to the target location, simply return the current block meta.
+    BlockStoreLocation oldLocation = tempBlockMeta.getBlockLocation();
+    if (oldLocation.belongsTo(newLocation)) {
+      LOG.info("moveBlockMeta: moving {} to {} is a noop", oldLocation, newLocation);
+      return tempBlockMeta;
+    }
+
+    long blockSize = tempBlockMeta.getBlockSize();
+    String newTierAlias = newLocation.tierAlias();
+    StorageTier newTier = getTier(newTierAlias);
+    StorageDir newDir = null;
+    if (newLocation.equals(BlockStoreLocation.anyDirInTier(newTierAlias))) {
+      for (StorageDir dir : newTier.getStorageDirs()) {
+        if (dir.getAvailableBytes() >= blockSize) {
+          newDir = dir;
+          break;
+        }
+      }
+    } else {
+      StorageDir dir = newTier.getDir(newLocation.dir());
+      if (dir != null && dir.getAvailableBytes() >= blockSize) {
+        newDir = dir;
+      }
+    }
+
+    if (newDir == null) {
+      throw new WorkerOutOfSpaceException("Failed to move BlockMeta: newLocation " + newLocation
+              + " does not have enough space for " + blockSize + " bytes");
+    }
+    StorageDir oldDir = tempBlockMeta.getParentDir();
+    oldDir.removeTempBlockMeta(tempBlockMeta);
+    TempBlockMeta newBlockMeta = new TempBlockMeta(tempBlockMeta.getSessionId(), tempBlockMeta.getBlockId(), blockSize, newDir);
+    newDir.addTempBlockMeta(newBlockMeta);
     return newBlockMeta;
   }
 
