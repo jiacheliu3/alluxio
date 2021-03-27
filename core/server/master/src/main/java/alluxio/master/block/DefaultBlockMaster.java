@@ -1044,6 +1044,7 @@ public final class DefaultBlockMaster extends CoreMaster implements BlockMaster 
     try (LockResource lr = lockBlock(blockId)) {
       Optional<BlockMeta> blockOpt = mBlockStore.getBlock(blockId);
       if (!blockOpt.isPresent()) {
+        LOG.warn("BlockId={} does not have block in BlockStore", blockId);
         return Optional.empty();
       }
       block = blockOpt.get();
@@ -1058,6 +1059,7 @@ public final class DefaultBlockMaster extends CoreMaster implements BlockMaster 
     for (BlockLocation location : blockLocations) {
       MasterWorkerInfo workerInfo =
           mWorkers.getFirstByField(ID_INDEX, location.getWorkerId());
+      LOG.warn("WorkerInfo is null for location {}", location);
       if (workerInfo != null) {
         // worker metadata is intentionally not locked here because:
         // - it would be an incorrect order (correct order is lock worker first, then block)

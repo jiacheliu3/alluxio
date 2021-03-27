@@ -909,6 +909,7 @@ public final class DefaultFileSystemMaster extends CoreMaster
       throws FileDoesNotExistException, UnavailableException {
     Inode inode = inodePath.getInode();
     AlluxioURI uri = inodePath.getUri();
+    // This will have 1 blockId and 0 blockInfo
     FileInfo fileInfo = inode.generateClientFileInfo(uri.toString());
     if (fileInfo.isFolder()) {
       fileInfo.setLength(inode.asDirectory().getChildCount());
@@ -917,11 +918,31 @@ public final class DefaultFileSystemMaster extends CoreMaster
     fileInfo.setInAlluxioPercentage(getInAlluxioPercentage(inode));
     if (inode.isFile()) {
       try {
+        if (fileInfo.getBlockIds().size() > 1) {
+          LOG.warn("Stop here and debug");
+        }
+//        2021-03-27 11:22:22,909 WARN  DefaultBlockMaster - BlockId=67108864001 does not have block in BlockStore
+//        2021-03-27 11:22:22,909 WARN  DefaultFileSystemMaster - BlockInfo missing for file: /test_file_large7. BlockIdsWithMissingInfos: 67108864000
+//        2021-03-27 11:22:22,910 WARN  DefaultFileSystemMaster - Error in FileInfo blockIds=[67108864000, 67108864001], blockInfos=[FileBlockInfo{blockInfo=BlockInfo{id=67108864000, length=0, locations=[]}, offset=0, ufsLocations=[]}]
+//        2021-03-27 11:23:14,478 WARN  DefaultBlockMaster - Rejecting attempt to change block length from 0 to 1048576
+
+
+        // 1 block: fileInfo.getFileBlockInfos will return empty because the FileInfo is not generated with blockInfo included
+        // 2 block: fileInfo.getFileBlockInfos return 1?
+        List<FileBlockInfo> currentBlocks = fileInfo.getFileBlockInfos();
+        // 1 block: getFileBlockInfoListInternal will return 1 FileBlockInfo
+        List<FileBlockInfo> gotBlocks = getFileBlockInfoListInternal(inodePath);
+        LOG.warn("Before update my current FileInfo has blockIds={}, blockInfos={}", fileInfo.getBlockIds(), fileInfo.getFileBlockInfos());
+        if (gotBlocks.size() != fileInfo.getFileBlockInfos().size()) {
+          LOG.warn("Updating from {} to {} blockInfos {}", currentBlocks.size(), gotBlocks.size(), gotBlocks);
+        }
+        // update from 0 to 1
         fileInfo.setFileBlockInfos(getFileBlockInfoListInternal(inodePath));
       } catch (InvalidPathException e) {
         throw new FileDoesNotExistException(e.getMessage(), e);
       }
     }
+
     // Rehydrate missing block-infos for persisted files.
     if (fileInfo.getBlockIds().size() > fileInfo.getFileBlockInfos().size()
         && inode.isPersisted()) {
@@ -930,6 +951,8 @@ public final class DefaultFileSystemMaster extends CoreMaster
 
       LOG.warn("BlockInfo missing for file: {}. BlockIdsWithMissingInfos: {}", inodePath.getUri(),
           missingBlockIds.stream().map(Object::toString).collect(Collectors.joining(",")));
+      LOG.warn("Mismatch in FileInfo blockIds={}, blockInfos={}", fileInfo.getBlockIds(), fileInfo.getFileBlockInfos());
+
       // Remove old block metadata from block-master before re-committing.
       mBlockMaster.removeBlocks(fileInfo.getBlockIds(), true);
       // Commit all the file blocks (without locations) so the metadata for the block exists.
