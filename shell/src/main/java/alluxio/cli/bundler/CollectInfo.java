@@ -227,6 +227,9 @@ public class CollectInfo extends AbstractShell {
     int ret;
     if (cmd.hasOption(LOCAL_OPTION_NAME)) {
       System.out.println("Executing collectInfo locally");
+      System.out.println("PropertyKey.CONF_DIR is " + conf.get(PropertyKey.CONF_DIR));
+      System.out.println("ALLUXIO_CONF_DIR is " + System.getenv("ALLUXIO_CONF_DIR"));
+
       ret = shell.collectInfoLocal(cmd);
     } else {
       System.out.println("Executing collectInfo on all nodes in the cluster");
@@ -462,8 +465,9 @@ public class CollectInfo extends AbstractShell {
 
     if (cmd == null) {
       // Unknown command (we did not find the cmd in our dict)
-      printHelp(String.format("%s is an unknown command.%n", subCommand));
-      return 1;
+      String message = String.format("%s is an unknown command.%n", subCommand);
+      printHelp(message);
+      throw new AlluxioException(message);
     }
     int ret = cmd.run(cmdLine);
 

@@ -64,6 +64,7 @@ if [[ -n "${ALLUXIO_HOME}" ]]; then
   ALLUXIO_JAVA_OPTS+=" -Dalluxio.home=${ALLUXIO_HOME}"
 fi
 
+echo "Setting ${ALLUXIO_CONF_DIR} in alluxio-config.sh"
 ALLUXIO_JAVA_OPTS+=" -Dalluxio.conf.dir=${ALLUXIO_CONF_DIR} -Dalluxio.logs.dir=${ALLUXIO_LOGS_DIR} -Dalluxio.user.logs.dir=${ALLUXIO_USER_LOGS_DIR}"
 
 if [[ -n "${ALLUXIO_RAM_FOLDER}" ]]; then
