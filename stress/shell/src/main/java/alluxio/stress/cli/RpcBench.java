@@ -12,7 +12,6 @@
 package alluxio.stress.cli;
 
 import alluxio.ClientContext;
-import alluxio.client.block.BlockMasterClient;
 import alluxio.conf.InstancedConfiguration;
 import alluxio.grpc.BlockIdList;
 import alluxio.grpc.BlockStoreLocationProto;
@@ -25,6 +24,7 @@ import alluxio.util.FormatUtils;
 import alluxio.util.network.NetworkAddressUtils;
 import alluxio.wire.WorkerNetAddress;
 import alluxio.util.executor.ExecutorServiceFactories;
+import alluxio.worker.block.BlockMasterClient;
 
 import alluxio.worker.block.BlockStoreLocation;
 import com.beust.jcommander.ParametersDelegate;
@@ -392,7 +392,7 @@ public class RpcBench extends Benchmark<RpcTaskResult> {
    * So if you are running all processes on the same machine,
    * the client side work affect the performance less.
    * */
-  public static class MockBlockMasterClient extends alluxio.worker.block.BlockMasterClient {
+  public static class MockBlockMasterClient extends BlockMasterClient {
     private List<LocationBlockIdListEntry> mLocationBlockIdList;
 
     /**
