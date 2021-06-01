@@ -1015,7 +1015,7 @@ public final class DefaultBlockMaster extends CoreMaster implements BlockMaster 
   private void processWorkerOrphanedBlocks(MasterWorkerInfo workerInfo) {
     for (long block : workerInfo.getBlocks()) {
       if (!mBlockStore.getBlock(block).isPresent()) {
-        LOG.info("Requesting delete for orphaned block: {} from worker {}.", block,
+        LOG.debug("Requesting delete for orphaned block: {} from worker {}.", block,
             workerInfo.getWorkerAddress().getHost());
         workerInfo.updateToRemovedBlock(true, block);
       }
