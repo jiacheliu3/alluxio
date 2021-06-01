@@ -993,7 +993,26 @@ public final class DefaultBlockMaster extends CoreMaster implements BlockMaster 
       for (long blockId : entry.getValue()) {
         try (LockResource lr = lockBlock(blockId)) {
           Optional<BlockMeta> block = mBlockStore.getBlock(blockId);
-          if (block.isPresent()) {
+//          if (block.isPresent()) {
+//            workerInfo.addBlock(blockId);
+//            BlockLocation blockLocation = BlockLocation.newBuilder()
+//                .setWorkerId(workerInfo.getId())
+//                .setTier(entry.getKey().getTier())
+//                .setMediumType(entry.getKey().getMediumType())
+//                .build();
+//            mBlockStore.addLocation(blockId, blockLocation);
+//            mLostBlocks.remove(blockId);
+//          } else {
+//            LOG.warn("Invalid block: {} from worker {}.", blockId,
+//                workerInfo.getWorkerAddress().getHost());
+//          }
+
+            if (block.isPresent()) {
+              // Skip
+            } else {
+              mBlockStore.putBlock(blockId, BlockMeta.newBuilder().setLength(67_108_864).build());
+            }
+
             workerInfo.addBlock(blockId);
             BlockLocation blockLocation = BlockLocation.newBuilder()
                 .setWorkerId(workerInfo.getId())
@@ -1002,10 +1021,6 @@ public final class DefaultBlockMaster extends CoreMaster implements BlockMaster 
                 .build();
             mBlockStore.addLocation(blockId, blockLocation);
             mLostBlocks.remove(blockId);
-          } else {
-            LOG.warn("Invalid block: {} from worker {}.", blockId,
-                workerInfo.getWorkerAddress().getHost());
-          }
         }
       }
     }
