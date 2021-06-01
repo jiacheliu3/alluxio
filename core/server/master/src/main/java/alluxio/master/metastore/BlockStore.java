@@ -83,6 +83,8 @@ public interface BlockStore extends Iterable<Block> {
    */
   void close();
 
+  long getBlockCount();
+
   /**
    * Block metadata.
    */

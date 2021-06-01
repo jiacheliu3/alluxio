@@ -192,6 +192,10 @@ public class RocksBlockStore implements BlockStore {
         (iter) -> new Block(Longs.fromByteArray(iter.key()), BlockMeta.parseFrom(iter.value())));
   }
 
+  public long getBlockCount() {
+    throw new UnsupportedOperationException("Not supported!");
+  }
+
   private RocksDB db() {
     return mRocksStore.getDb();
   }
