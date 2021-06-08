@@ -310,7 +310,7 @@ public final class FileSystemMasterTest {
         ImmutableMap.of(), ImmutableMap.of(), mMetrics);
     // Verify the muted Free command on worker1.
     assertEquals(Command.newBuilder().setCommandType(CommandType.Nothing).build(), heartbeat1);
-    assertFalse(mBlockMaster.isBlockLost(blockId));
+    assertFalse(mBlockMaster.getLostBlocks().contains(blockId));
 
     // verify the file is deleted
     assertEquals(IdUtils.INVALID_FILE_ID, mFileSystemMaster.getFileId(NESTED_FILE_URI));

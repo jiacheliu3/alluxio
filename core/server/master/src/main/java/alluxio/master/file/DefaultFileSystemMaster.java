@@ -196,7 +196,6 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -2673,9 +2672,7 @@ public final class DefaultFileSystemMaster extends CoreMaster
   @Override
   public List<Long> getLostFiles() {
     Set<Long> lostFiles = new HashSet<>();
-    Iterator<Long> iter = mBlockMaster.getLostBlocksIterator();
-    while (iter.hasNext()) {
-      long blockId = iter.next();
+    for (long blockId : mBlockMaster.getLostBlocks()) {
       // the file id is the container id of the block id
       long containerId = BlockId.getContainerId(blockId);
       long fileId = IdUtils.createFileId(containerId);

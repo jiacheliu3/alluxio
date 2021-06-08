@@ -30,9 +30,6 @@ import alluxio.wire.BlockInfo;
 import alluxio.wire.WorkerInfo;
 import alluxio.wire.WorkerNetAddress;
 
-import com.google.common.annotations.VisibleForTesting;
-
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -214,24 +211,9 @@ public interface BlockMaster extends Master, ContainerIdGenerable {
       List<Metric> metrics);
 
   /**
-   * @param blockId the block ID
-   * @return whether the block is considered lost in Alluxio
+   * @return the block ids of lost blocks in Alluxio
    */
-  boolean isBlockLost(long blockId);
-
-  /**
-   * Returns an {@link Iterator} over the lost blocks.
-   * Note that the iterator should not be shared across threads.
-   *
-   * @return an Iterator
-   */
-  Iterator<Long> getLostBlocksIterator();
-
-  /**
-   * @return the number of lost blocks in Alluxio
-   */
-  @VisibleForTesting
-  int getLostBlocksCount();
+  Set<Long> getLostBlocks();
 
   /**
    * Reports the ids of the blocks lost on workers.

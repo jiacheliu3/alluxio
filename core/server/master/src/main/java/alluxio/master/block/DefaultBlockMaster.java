@@ -1027,18 +1027,8 @@ public final class DefaultBlockMaster extends CoreMaster implements BlockMaster 
   }
 
   @Override
-  public boolean isBlockLost(long blockId) {
-    return mLostBlocks.contains(blockId);
-  }
-
-  @Override
-  public Iterator<Long> getLostBlocksIterator() {
-    return mLostBlocks.iterator();
-  }
-
-  @Override
-  public int getLostBlocksCount() {
-    return mLostBlocks.size();
+  public Set<Long> getLostBlocks() {
+    return ImmutableSet.copyOf(mLostBlocks);
   }
 
   /**
